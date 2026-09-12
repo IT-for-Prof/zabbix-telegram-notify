@@ -1,0 +1,104 @@
+# Media type "ZNT" (id 24), exported with
+# configuration.export on 2026-09-09 and importable as-is.
+#
+# Versioned here so the channel is described in the same place as the code
+# that serves it: script_name and the three parameters below are the contract
+# between Zabbix and zbxTelegram.py, and changing either half alone breaks
+# delivery.
+#
+# Two things this file deliberately does not contain:
+#
+# - No secrets, although two parameters now carry them. {$TG_TOKEN} and
+#   {$ZNT_ZABBIX_PASS} are global macros of type "Secret text": Zabbix resolves
+#   them for script parameters but exports the macro name, so this file stays
+#   safe to publish while the values stay in the database, masked in the UI.
+# - No second "silent" media type. Media type 28 "ZNT Silent" was deleted on
+#   2026-09-09: silence is decided per message now, so one media type active
+#   24/7 is the whole channel.
+#
+# A further optional parameter overrides quiet_hours from the .cfg:
+#     --quiet-hours=1-5,00:00-08:30;1-5,19:00-24:00;6-7,00:00-24:00
+# Clone this media type with a different value to give an audience its own
+# window. Keep every user media at 1-7,00:00-24:00: several media types are
+# harmless, a media type that goes inactive is what loses recoveries.
+#
+# The message_templates below are Zabbix defaults, used only by an operation
+# with default_msg=1. Every ZNT action sets its own custom message, whose
+# subject contains exactly one of the {Problem}/{Resolved}/{Update} literals
+# the volume rule reads - anywhere in the subject, and exactly one: two
+# different literals leave the message unclassified, which is sent loudly. A
+# new action left on the default message inherits these subjects, which carry
+# no literal at all, and its recoveries go out loud. Give new actions a custom message.
+zabbix_export:
+  version: '7.0'
+  media_types:
+    - name: ZNT
+      type: SCRIPT
+      script_name: zbxTelegram.py
+      parameters:
+        - sortorder: '0'
+          value: '{ALERT.SENDTO}'
+        - sortorder: '1'
+          value: '{ALERT.SUBJECT}'
+        - sortorder: '2'
+          value: '{ALERT.MESSAGE}'
+        - sortorder: '3'
+          value: '{$TG_TOKEN}'
+        - sortorder: '4'
+          value: '--zabbix-pass={$ZNT_ZABBIX_PASS}'
+      attempt_interval: 30s
+      message_templates:
+        - event_source: TRIGGERS
+          operation_mode: PROBLEM
+          subject: 'Problem: {EVENT.NAME}'
+          message: |
+            Problem started at {EVENT.TIME} on {EVENT.DATE}
+            Problem name: {EVENT.NAME}
+            Host: {HOST.NAME}
+            Host group: {TRIGGER.HOSTGROUP.NAME}
+            Severity: {EVENT.SEVERITY}
+            Operational data: {EVENT.OPDATA}
+            Описание: {TRIGGER.DESCRIPTION}
+            Original problem ID: {EVENT.ID}
+            {TRIGGER.URL}
+        - event_source: TRIGGERS
+          operation_mode: RECOVERY
+          subject: 'Resolved in {EVENT.DURATION}: {EVENT.NAME}'
+          message: |
+            Problem has been resolved in {EVENT.DURATION} at {EVENT.RECOVERY.TIME} on {EVENT.RECOVERY.DATE}
+            Problem name: {EVENT.NAME}
+            Host: {HOST.NAME}
+            Host group: {TRIGGER.HOSTGROUP.NAME}
+            Severity: {EVENT.SEVERITY}
+            Original problem ID: {EVENT.ID}
+            {TRIGGER.URL}
+        - event_source: TRIGGERS
+          operation_mode: UPDATE
+          subject: 'Updated problem: {EVENT.NAME}'
+          message: |
+            {USER.FULLNAME} {EVENT.UPDATE.ACTION} problem at {EVENT.UPDATE.DATE} {EVENT.UPDATE.TIME}.
+            {EVENT.UPDATE.MESSAGE}
+
+            Current problem status is {EVENT.STATUS}, acknowledged: {EVENT.ACK.STATUS}.
+        - event_source: DISCOVERY
+          operation_mode: PROBLEM
+          subject: 'Discovery: {DISCOVERY.DEVICE.STATUS} {DISCOVERY.DEVICE.IPADDRESS}'
+          message: |
+            Discovery rule: {DISCOVERY.RULE.NAME}
+
+            Device IP: {DISCOVERY.DEVICE.IPADDRESS}
+            Device DNS: {DISCOVERY.DEVICE.DNS}
+            Device status: {DISCOVERY.DEVICE.STATUS}
+            Device uptime: {DISCOVERY.DEVICE.UPTIME}
+
+            Device service name: {DISCOVERY.SERVICE.NAME}
+            Device service port: {DISCOVERY.SERVICE.PORT}
+            Device service status: {DISCOVERY.SERVICE.STATUS}
+            Device service uptime: {DISCOVERY.SERVICE.UPTIME}
+        - event_source: AUTOREGISTRATION
+          operation_mode: PROBLEM
+          subject: 'Autoregistration: {HOST.HOST}'
+          message: |
+            Host name: {HOST.HOST}
+            Host IP: {HOST.IP}
+            Agent port: {HOST.PORT}

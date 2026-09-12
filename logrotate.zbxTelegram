@@ -1,0 +1,21 @@
+# Install as /etc/logrotate.d/zbxTelegram
+#
+# The alertscript runs as the zabbix user, one short-lived process per alert,
+# so it never holds the file open across a rotation: no copytruncate needed.
+# Create the directory once, owned by the user Zabbix runs the script as:
+#
+#   install -d -o zabbix -g zabbix -m 0750 /var/log/zbxTelegram
+#
+# Replaces the previous arrangement, where every alert appended to
+# zbxTelegram_files/znt.log with no rotation at all (199 MB since 2022-05-23).
+
+/var/log/zbxTelegram/zbxTelegram.log {
+    su zabbix zabbix
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 zabbix zabbix
+}

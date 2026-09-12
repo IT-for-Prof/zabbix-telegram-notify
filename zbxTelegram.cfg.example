@@ -1,0 +1,128 @@
+# zbxTelegram configuration.
+#
+# Copy to zbxTelegram.cfg next to the script, or point ZNT_CONFIG at it.
+#
+# Section names group keys for human readers only. Every key is the exact
+# name used in zbxTelegram.py, so a name in the code greps straight to a
+# line here.
+#
+# Values: yes/no become booleans, bare digits become integers, anything
+# else stays a string. Wrap a value in double quotes to keep leading or
+# trailing whitespace ("  " is a real, meaningful delimiter value).
+#
+# SECRETS reach the script by whichever of these is set, in this order:
+#
+#   1. media type parameters  - a global macro of type "Secret text", passed as
+#                               a script parameter. Masked in the UI, exported
+#                               by name, changed without touching the host.
+#   2. the environment        - ZNT_TG_TOKEN, ZNT_ZABBIX_PASS, ZNT_ZABBIX_LOGIN,
+#                               ZNT_TG_PROXY_URL
+#   3. this file              - tg_token, zabbix_api_pass, tg_proxy_url
+#
+# Route 3 is the only one not visible in `ps` and not stored in the Zabbix
+# database; route 1 is the most convenient. The keys are absent below on
+# purpose, so a copy of this example carries no secret. See README.md.
+
+[config]
+config_debug_mode = no
+config_exc_info = no
+# Must be writable by the user Zabbix runs alertscripts as, and is only used
+# when a recipient is given by name rather than by numeric chat id.
+config_cache_file = /var/lib/zbxTelegram/id.cache
+config_log_file = /var/log/zbxTelegram/zbxTelegram.log
+
+[telegram]
+tg_proxy = no
+# Telegram's HARD limits, not a preference: 1024 for a caption (a message sent
+# with a chart), 4096 for a plain message. Counted in UTF-16 code units after
+# HTML parsing, over the whole rendered message - so a non-BMP emoji costs two,
+# and every severity emoji this script injects is non-BMP. Lowering these is
+# safe; raising them makes Telegram reject the message and lose the alert.
+tg_caption_max_symbol = 1024
+tg_message_max_symbol = 4096
+
+# Quiet hours: when a PROBLEM goes out with the Telegram notification muted.
+# RESOLVED and UPDATE are always muted, whatever the hour, so a recovery never
+# needs to reach a different media type than its problem did - which is what
+# used to drop it entirely.
+#
+# Zabbix time period syntax, so this reads the same as a media "When active"
+# window: d-d,hh:mm-hh:mm, ';'-separated, days 1-7 = Mon-Sun, end after start.
+# A period cannot cross midnight, so a 19:00-08:30 night is two periods.
+# Empty means never quiet.
+#
+# A media type can override this with a script parameter, which puts the policy
+# where the on-call person actually looks and lets two audiences differ:
+#     --quiet-hours=1-5,00:00-08:30;1-5,19:00-24:00;6-7,00:00-24:00
+# Give every media a 1-7,00:00-24:00 "When active" window regardless. Using the
+# media period as the volume control is what dropped recoveries.
+[quiet]
+quiet_hours = 1-5,00:00-08:30;1-5,19:00-24:00;6-7,00:00-24:00
+
+[body]
+body_messages = <b>{subject}</b>{body}{links}{tags}
+body_messages_cut_symbol = yes
+body_messages_max_symbol = 600
+body_messages_title = {title} ({period_time})
+
+[links]
+body_messages_url = yes
+body_messages_url_notes = yes
+body_messages_url_graphs = yes
+body_messages_url_host = yes
+body_messages_url_ack = yes
+body_messages_url_event = yes
+body_messages_url_template = <a href="{url}">{icon}</a>
+body_messages_url_delimiter = " "
+body_messages_url_emoji_no_url = ➖
+body_messages_url_emoji_notes = ℹ️
+body_messages_url_emoji_graphs = 📊
+body_messages_url_emoji_host = 📟
+body_messages_url_emoji_ack = ✉️
+body_messages_url_emoji_event = 📋
+
+[tags]
+body_messages_tags = yes
+body_messages_tags_event = yes
+body_messages_tags_eventid = yes
+body_messages_tags_itemid = yes
+body_messages_tags_triggerid = yes
+body_messages_tags_actionid = yes
+body_messages_tags_hostid = yes
+body_messages_tags_no = #no_tags
+body_messages_tags_delimiter = " "
+body_messages_tags_prefix_eventid = eid_
+body_messages_tags_prefix_itemid = iid_
+body_messages_tags_prefix_triggerid = tid_
+body_messages_tags_prefix_actionid = aid_
+body_messages_tags_prefix_hostid = hid_
+
+[zabbix]
+# Both the frontend the script logs into for charts AND the base of every link
+# in the delivered message. A loopback value fetches charts fine and produces
+# links no recipient can open. TLS certificates are not verified on this URL.
+zabbix_api_url = http://127.0.0.1/zabbix/
+zabbix_api_login = Admin
+zabbix_graph = yes
+zabbix_graph_period_default = 10800
+zabbix_graph_chart = {zabbix_server}chart3.php?name={name}&from=now-{range_time}&to=now&width=900&height=200&items[0][itemid]={itemid}&legend=1&showtriggers=1&showworkperiod=1
+# URL shapes below are the Zabbix 7.0 frontend's. On another version, open the
+# corresponding page in a browser and copy the URL; a wrong template costs a
+# dead link, not a notification.
+zabbix_host_link = {zabbix_server}zabbix.php?action=search&search={host}
+zabbix_graph_link = {zabbix_server}history.php?action=showgraph&itemids[]={itemid}&from=now-{range_time}&to=now
+zabbix_ack_link = {zabbix_server}zabbix.php?action=popup&popup_action=acknowledge.edit&eventids[0]={eventid}
+zabbix_event_link = {zabbix_server}tr_events.php?triggerid={triggerid}&eventid={eventid}
+
+# Keys are the literals Zabbix actions put in the subject; case matters.
+[emoji]
+Problem = 🚨
+Resolved = ✅
+Update = 🚧
+Not classified = ⁉️
+Information = 💙
+Warning = 💛
+Average = 🧡
+High = ❤️
+Disaster = 💔
+Test = 🚽💩

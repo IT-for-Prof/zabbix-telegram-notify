@@ -1,0 +1,45 @@
+# Public repository: deny everything, then allow only what has been reviewed.
+#
+# Every directory is re-opened and immediately re-closed. Allowing a directory
+# on its own would reopen everything inside it, which is how docs/token.txt or
+# tests/creds.py would have slipped through.
+/*
+
+!/.gitignore
+!/LICENSE
+!/README.md
+!/.requirements
+!/actions.example
+!/zbxTelegram.py
+!/zbxTelegram.cfg.example
+!/logrotate.zbxTelegram
+!/mediatypes.yaml
+
+!/tests/
+/tests/*
+!/tests/test_parse.py
+
+# Runtime data lives beside the script; only the shipped assets are tracked.
+!/zbxTelegram_files/
+/zbxTelegram_files/*
+!/zbxTelegram_files/test.png
+!/zbxTelegram_files/error_send_photo.png
+!/zbxTelegram_files/classes/
+/zbxTelegram_files/classes/*
+!/zbxTelegram_files/classes/argparser.py
+
+# The audit and design notes stay internal: they name hosts, host groups, user
+# and action ids, and alert rows of the contour this fork runs in. Kept on disk,
+# never tracked. /* already denies them; this says so on purpose.
+/docs/
+
+# Belt and braces: these never belong in a public tree, wherever they appear.
+# Listed last so they win over every allow rule above.
+*.cfg
+*.env
+zbxTelegram_config.py
+id.cache
+*.log
+venv/
+__pycache__/
+*.pyc
