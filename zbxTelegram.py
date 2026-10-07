@@ -24,6 +24,7 @@ import logging
 import html
 import configparser
 import datetime
+import time
 
 
 # A Telegram API error carries the full request URL, .../bot<token>/sendPhoto?...
@@ -295,6 +296,30 @@ apihelper.RETRY_ON_ERROR = True
 apihelper.RETRY_ENGINE = 1
 apihelper.MAX_RETRIES = 3
 apihelper.RETRY_TIMEOUT = 1
+# Zabbix kills a script media type after 40 s (ALARM_ACTION_TIMEOUT in
+# src/libs/zbxalerter/alerter.c, 7.0); a flood wait may run up to this point of
+# the process's life, leaving the rest for the send itself.
+STARTED = time.monotonic()
+SEND_DEADLINE = 30
+
+
+def telegram(call, **kwargs):
+    """Make a Bot API call, waiting out a 429 while the alert's budget allows.
+
+    Telegram takes about 20 messages a minute in one group and says how long to
+    wait. With the media type's sessions at 1 the wait also paces the alerts
+    queued behind this one; a wait past the budget goes back to Zabbix as exit 1.
+    """
+    while True:
+        try:
+            return call(**kwargs)
+        except apihelper.ApiTelegramException as err:
+            retry_after = (err.result_json.get('parameters') or {}).get('retry_after')
+            if (err.error_code != 429 or not retry_after
+                    or time.monotonic() - STARTED + retry_after > SEND_DEADLINE):
+                raise
+            loggings.warning('Telegram flood limit, %s retries in %s s', call.__name__, retry_after)
+            time.sleep(retry_after)
 if tg_proxy:
     if not tg_proxy_server.get('https'):
         # requests treats {'https': ''} as no proxy at all, so this would go
@@ -608,7 +633,7 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                 try:
                     graphs_png[0].caption = message
                     graphs_png[0].parse_mode = "HTML"
-                    bot.send_media_group(chat_id=sent_id, media=graphs_png, disable_notification=disable_notification)
+                    telegram(bot.send_media_group, chat_id=sent_id, media=graphs_png, disable_notification=disable_notification)
                 except apihelper.ApiException as err:
                     if 'migrate_to_chat_id' in err.result.text:
                         migrate_group_id(sent_to, sent_id, err)
@@ -624,19 +649,19 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                     exit(0)
             elif graphs_png and graphs_png.get('img'):
                 try:
-                    bot.send_photo(chat_id=sent_id, photo=graphs_png.get('img'), caption=message,
-                                   parse_mode="HTML",
-                                   disable_notification=disable_notification)
+                    telegram(bot.send_photo, chat_id=sent_id, photo=graphs_png.get('img'), caption=message,
+                             parse_mode="HTML",
+                             disable_notification=disable_notification)
                 except apihelper.ApiException as err:
                     if 'migrate_to_chat_id' in err.result.text:
                         migrate_group_id(sent_to, sent_id, err)
                         send_messages(sent_to, message, graphs_png, disable_notification)
                     elif 'IMAGE_PROCESS_FAILED' in err.result.text:
-                        bot.send_photo(chat_id=sent_id, photo=open(
+                        telegram(bot.send_photo, chat_id=sent_id, photo=open(
                               file='{0}/zbxTelegram_files/error_send_photo.png'.format(
                                   os.path.dirname(os.path.realpath(__file__))),
                               mode='rb').read(), caption=message, parse_mode="HTML",
-                                       disable_notification=disable_notification)
+                             disable_notification=disable_notification)
                     else:
                         loggings.error("Exception occurred in Api Telegram: {}".format(err), exc_info=config_exc_info),
                         exit(1)
@@ -647,9 +672,9 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                         sent_to=sent_to, sent_id=sent_id, bot=bot_identity()))
             else:
                 try:
-                    bot.send_message(chat_id=sent_id, text=message, parse_mode="HTML",
-                                     disable_web_page_preview=True,
-                                     disable_notification=disable_notification)
+                    telegram(bot.send_message, chat_id=sent_id, text=message, parse_mode="HTML",
+                             disable_web_page_preview=True,
+                             disable_notification=disable_notification)
                 except apihelper.ApiException as err:
                     if 'migrate_to_chat_id' in err.result.text:
                         migrate_group_id(sent_to, sent_id, err)

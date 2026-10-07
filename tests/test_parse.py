@@ -330,6 +330,89 @@ def test_telegram_retry_configuration():
     assert znt.apihelper.RETRY_TIMEOUT == 1
 
 
+def _flood_error(retry_after):
+    err = _StubError('Error code: 429. Description: Too Many Requests: '
+                     'retry after {}'.format(retry_after))
+    err.error_code = 429
+    err.result_json = {'ok': False, 'error_code': 429,
+                       'parameters': {'retry_after': retry_after}}
+    return err
+
+
+class _FloodedBot(object):
+    """send_message answers 429 a given number of times, then succeeds."""
+
+    def __init__(self, floods, retry_after):
+        self.floods, self.retry_after, self.sent = floods, retry_after, 0
+
+    def send_message(self, **kwargs):
+        if self.floods:
+            self.floods -= 1
+            raise _flood_error(self.retry_after)
+        self.sent += 1
+
+    def get_me(self):
+        return type('Me', (), {'username': 'testbot', 'id': 1})()
+
+
+def test_flood_limit_is_waited_out_instead_of_losing_the_alert():
+    """A DNS outage escalated ~50 problems to one group in two minutes.
+    Telegram allows ~20 messages a minute per group and answered 429 with
+    retry_after; the script exited 1 at once, Zabbix's three attempts 30 s apart
+    landed inside the same flood window, and an alert was lost."""
+    slept = []
+    bot = _FloodedBot(floods=2, retry_after=3)
+    saved = znt.bot, znt.get_send_id, znt.time.sleep, znt.args
+    znt.bot, znt.get_send_id, znt.time.sleep = bot, lambda to: 1, slept.append
+    znt.args = znt.ArgParsing().create_parser().parse_args(['testuser', 's', '<root/>'])
+    try:
+        znt.send_messages('testuser', '<b>msg</b>', False)
+    except SystemExit as err:
+        code = err.code
+    finally:
+        znt.bot, znt.get_send_id, znt.time.sleep, znt.args = saved
+    assert code == 0, code
+    assert bot.sent == 1, bot.sent
+    assert slept == [3, 3], slept
+
+
+def test_flood_wait_that_overruns_the_alert_timeout_returns_to_zabbix():
+    """Zabbix kills a script media type at 40 s; a wait past the budget would
+    be a timeout instead of a clean failure Zabbix retries on its schedule."""
+    slept = []
+    bot = _FloodedBot(floods=1, retry_after=znt.SEND_DEADLINE + 1)
+    real_sleep, znt.time.sleep = znt.time.sleep, slept.append
+    try:
+        znt.telegram(bot.send_message, chat_id=1, text='x')
+    except _StubError as err:
+        assert err.error_code == 429
+    else:
+        raise AssertionError('a flood past the budget must be raised')
+    finally:
+        znt.time.sleep = real_sleep
+    assert slept == [] and bot.sent == 0, (slept, bot.sent)
+
+
+def test_other_telegram_errors_are_not_retried():
+    slept = []
+    calls = []
+
+    def bad_request(**kwargs):
+        calls.append(kwargs)
+        err = _StubError('Error code: 400. Description: Bad Request')
+        err.error_code, err.result_json = 400, {'ok': False, 'error_code': 400}
+        raise err
+
+    real_sleep, znt.time.sleep = znt.time.sleep, slept.append
+    try:
+        znt.telegram(bad_request, chat_id=1)
+    except _StubError:
+        pass
+    finally:
+        znt.time.sleep = real_sleep
+    assert len(calls) == 1 and slept == [], (calls, slept)
+
+
 def test_argv_survives_a_non_utf8_locale():
     """Zabbix passes UTF-8 bytes; an interpreter with no UTF-8 locale decodes
     them as ASCII with surrogateescape. The lone surrogates that produces cannot

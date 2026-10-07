@@ -1,3 +1,5 @@
-pyTelegramBotAPI==4.15.4
+# 4.9.0 is the last release that imports on Python 3.6 (4.10+ needs 3.7: from
+# __future__ import annotations), and the script runs on the system Python.
+pyTelegramBotAPI==4.9.0
 pysocks==1.7.1
 xmltodict==0.15.0

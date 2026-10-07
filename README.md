@@ -298,6 +298,13 @@ Telegram connection, DNS and timeout errors get three short attempts (two
 retries) inside the script before it returns **1**; a longer outage is left to
 Zabbix's own retry schedule.
 
+A flood limit (HTTP 429, about 20 messages a minute in one group) is waited out
+for the `retry_after` Telegram names and logged as a WARNING, as long as the
+wait ends within 30 s of the script's start; Zabbix kills a script media type at
+40 s. A longer wait returns **1** at once. Keep the media type's *Concurrent
+sessions* at 1: then the wait paces the whole alert queue, so a burst of
+problems arrives late rather than lost.
+
 | Symptom | Cause |
 |---|---|
 | `Telegram token is not set (got '{$TG_TOKEN}')` | the macro does not exist, or is not of a type Zabbix resolves here |
