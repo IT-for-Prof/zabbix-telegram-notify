@@ -651,6 +651,41 @@ def test_main_delivers_a_normal_alert_within_the_caption_limit():
     assert sent['disable_notification'] is False, 'a problem outside quiet hours is loud'
 
 
+def test_chart_fetch_failure_falls_back_to_text():
+    """A frontend outage must not discard the alert with its chart."""
+    sent = []
+
+    class TextBot(object):
+        def send_message(self, **kwargs):
+            sent.append(kwargs['text'])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError('frontend unavailable')
+
+    real = (znt.get_cookie, znt.requests.get, znt.bot, znt.get_send_id,
+            znt.bot_identity, znt.args)
+    znt.get_cookie = lambda: {'zbx_session': 'test'}
+    znt.requests.get = fail
+    znt.bot = TextBot()  # A photo or media-group call cannot succeed here.
+    znt.get_send_id = lambda recipient: 1
+    znt.bot_identity = lambda: '@testbot(1)'
+    try:
+        for itemids in ('60605', '60605 60606'):
+            envelope = ENVELOPE.format(message='alert body').replace(
+                '<graphs>False</graphs>', '<graphs>True</graphs>').replace(
+                '<itemid>60605</itemid>', '<itemid>{}</itemid>'.format(itemids))
+            znt.args = znt.ArgParsing().create_parser().parse_args(
+                ['testuser', '{Problem}: test', envelope])
+            try:
+                znt.main()
+            except SystemExit as err:
+                assert err.code == 0, err.code
+    finally:
+        (znt.get_cookie, znt.requests.get, znt.bot, znt.get_send_id,
+         znt.bot_identity, znt.args) = real
+    assert len(sent) == 2 and all('alert body' in message for message in sent), sent
+
+
 # --- defect 4: unexpanded Zabbix macros in the subject ----------------------
 
 def test_status_literal_becomes_an_emoji():

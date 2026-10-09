@@ -422,7 +422,10 @@ def get_chart_png(itemid, graff_name, period=None):
         else:
             return dict(img=None, url=None)
     except Exception as err:
-        loggings.error("Exception occurred: {}".format(err), exc_info=config_exc_info), exit(1)
+        # A chart outage must not discard the alert text.
+        loggings.warning("Chart unavailable; sending alert without it: {}".format(err),
+                         exc_info=config_exc_info)
+        return dict(img=None, url=None)
 
 
 def create_tags_list(_bool=False, tag=None, _type=None):
