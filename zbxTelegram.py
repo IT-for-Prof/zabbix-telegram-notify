@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/opt/zbxTelegram/venv/bin/python
 # -*- coding: utf-8 -*-
 ########################
 #    Sokolov Dmitry    #
@@ -11,7 +11,7 @@ __maintainer__ = "Sokolov Dmitry"
 __license__ = "MIT"
 import telebot
 from telebot import apihelper
-from telebot.types import InputMediaPhoto
+from telebot.types import InputMediaPhoto, LinkPreviewOptions
 from zbxTelegram_files.classes.argparser import ArgParsing
 import xmltodict
 import requests
@@ -427,16 +427,23 @@ def get_chart_png(itemid, graff_name, period=None):
 
             ctype = response.headers.get('Content-Type', '')
             if response.status_code != 200 or not ctype.startswith('image/'):
-                # Zabbix 8.0 answers chart3.php with an HTML page (bad parameters,
-                # no permission) instead of a PNG; Telegram rejects those bytes as a
-                # photo (PHOTO_INVALID_DIMENSIONS) and the whole alert is lost.
+                # A login or error page instead of the chart (expired session, no
+                # permission on the item); Telegram would reject it as a photo.
                 loggings.warning('Chart is not an image (HTTP %s, %s, %s): %r; sending text only',
                                  response.status_code, ctype, response.url, response.content[:300])
                 return dict(img=None, url=None)
             size = png_size(response.content)
+            # The frontend draws its own warnings (e.g. no OS locale for the user's
+            # language) as a PNG of ~13 px per line in place of the chart; a chart
+            # is never that short.
+            if size and size[1] < 100:
+                loggings.warning('Chart %sx%s is a Zabbix frontend message, not a chart - open the URL '
+                                 'as the chart user to read it (%s); sending text only',
+                                 size[0], size[1], response.url)
+                return dict(img=None, url=None)
             # Telegram rejects a photo whose sides sum over 10000 px or whose aspect
-            # ratio exceeds 20 (PHOTO_INVALID_DIMENSIONS) and the alert is lost with it.
-            if size and (size[0] + size[1] > 10000 or max(size) > 20 * max(1, min(size))):
+            # ratio exceeds 20 (PHOTO_INVALID_DIMENSIONS).
+            if size and (size[0] + size[1] > 10000 or max(size) > 20 * min(size)):
                 loggings.warning('Chart %sx%s is outside Telegram photo limits (%s); sending text only',
                                  size[0], size[1], response.url)
                 return dict(img=None, url=None)
@@ -664,8 +671,9 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                         migrate_group_id(sent_to, sent_id, err)
                         send_messages(sent_to, message, graphs_png, disable_notification)
                     else:
-                        loggings.error("Exception occurred in Api Telegram: {}".format(err), exc_info=config_exc_info),
-                        exit(1)
+                        # The chart is optional, the alert is not: deliver it as text.
+                        loggings.warning("Telegram refused the chart ({}); sending text only".format(err))
+                        send_messages(sent_to, message, None, disable_notification)
                 except Exception as err:
                     loggings.error("Exception occurred: {}".format(err), exc_info=config_exc_info),exit(1)
                 else:
@@ -688,8 +696,9 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                               mode='rb').read(), caption=message, parse_mode="HTML",
                              disable_notification=disable_notification)
                     else:
-                        loggings.error("Exception occurred in Api Telegram: {}".format(err), exc_info=config_exc_info),
-                        exit(1)
+                        # The chart is optional, the alert is not: deliver it as text.
+                        loggings.warning("Telegram refused the chart ({}); sending text only".format(err))
+                        send_messages(sent_to, message, None, disable_notification)
                 except Exception as err:
                     loggings.error("Exception occurred: {}".format(err), exc_info=config_exc_info),exit(1)
                 else:
@@ -698,7 +707,7 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
             else:
                 try:
                     telegram(bot.send_message, chat_id=sent_id, text=message, parse_mode="HTML",
-                             disable_web_page_preview=True,
+                             link_preview_options=LinkPreviewOptions(is_disabled=True),
                              disable_notification=disable_notification)
                 except apihelper.ApiException as err:
                     if 'migrate_to_chat_id' in err.result.text:

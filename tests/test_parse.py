@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """Regression tests for the defects the 2026-09-09 audit found.
 
-No framework, no fixtures: python3 tests/test_parse.py. mon runs 3.6.8, so
-nothing here may use syntax newer than that.
+No framework, no fixtures: python3 tests/test_parse.py (3.11+, as the script).
 
 zbxTelegram.py talks to Telegram, Zabbix and Pillow at import time. Those are
 stubbed out below; xmltodict is real, because parsing the envelope is exactly
@@ -13,6 +12,7 @@ import io
 import os
 import re
 import stat
+import struct
 import sys
 import tempfile
 
@@ -957,59 +957,74 @@ def test_unwritable_log_does_not_kill_delivery():
         znt.config_log_file = os.path.join(_TMP, 'znt.log')
 
 
+def _png(w, h):
+    return b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\rIHDR' + struct.pack('>II', w, h) + b'\x08\x06\x00\x00\x00'
+
+
+def _chart(ctype, body):
+    """get_chart_png against a frontend that answers with this body."""
+    resp = type('Resp', (), {'status_code': 200, 'headers': {'Content-Type': ctype},
+                             'content': body, 'url': 'u'})()
+    saved = znt.requests, znt.get_cookie
+    znt.requests = type('Requests', (), {'get': lambda self, *a, **k: resp})()
+    znt.get_cookie = lambda: {'zbx_session': 'x'}
+    try:
+        return znt.get_chart_png(itemid=1, graff_name='g', period=60)['img']
+    finally:
+        znt.requests, znt.get_cookie = saved
+
+
 def test_chart_that_is_not_an_image_is_dropped_not_sent():
-    """Zabbix 8.0 can answer chart3.php with HTML; sending it as a photo loses the alert."""
-    class _Resp(object):
-        def __init__(self, ctype, body):
-            self.status_code, self.headers, self.content, self.url = 200, {'Content-Type': ctype}, body, 'u'
-
-    class _Requests(object):
-        def __init__(self, resp):
-            self.resp = resp
-
-        def get(self, *args, **kwargs):
-            return self.resp
-
-    saved = znt.requests, znt.get_cookie
-    znt.get_cookie = lambda: {'zbx_session': 'x'}
-    try:
-        znt.requests = _Requests(_Resp('text/html; charset=UTF-8', b'<!DOCTYPE html>'))
-        assert znt.get_chart_png(itemid=1, graff_name='g', period=60)['img'] is None
-        znt.requests = _Requests(_Resp('image/png', b'\x89PNG'))
-        assert znt.get_chart_png(itemid=1, graff_name='g', period=60)['img'] == b'\x89PNG'
-    finally:
-        znt.requests, znt.get_cookie = saved
+    assert _chart('text/html; charset=UTF-8', b'<!DOCTYPE html>') is None
+    assert _chart('image/png', b'\x89PNG') == b'\x89PNG'
 
 
-def test_chart_outside_telegram_photo_limits_is_dropped():
-    """A real PNG Telegram cannot take (ratio > 20, sides > 10000) must not cost the alert."""
-    import struct
-
-    def png(w, h):
-        return b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\rIHDR' + struct.pack('>II', w, h) + b'\x08\x06\x00\x00\x00'
-
-    class _Resp(object):
-        def __init__(self, body):
-            self.status_code, self.headers, self.content, self.url = 200, {'Content-Type': 'image/png'}, body, 'u'
-
-    class _Requests(object):
-        def __init__(self, body):
-            self.body = body
-
-        def get(self, *args, **kwargs):
-            return _Resp(self.body)
-
-    assert znt.png_size(png(900, 200)) == (900, 200)
+def test_chart_telegram_cannot_take_or_frontend_message_is_dropped():
+    assert znt.png_size(_png(900, 200)) == (900, 200)
     assert znt.png_size(b'<html>') is None
-    saved = znt.requests, znt.get_cookie
-    znt.get_cookie = lambda: {'zbx_session': 'x'}
-    try:
-        for w, h, ok in ((900, 200, True), (900, 30, False), (9000, 2000, False)):
-            znt.requests = _Requests(png(w, h))
-            got = znt.get_chart_png(itemid=1, graff_name='g', period=60)['img']
-            assert (got is not None) == ok, (w, h)
-    finally:
-        znt.requests, znt.get_cookie = saved
+    # 3363x13: Zabbix 8.0 warning "Locale for language en_GB is not found" drawn in place of the chart
+    for w, h, ok in ((1016, 354, True), (3363, 13, False), (250, 13, False), (1200, 90, False),
+                     (900, 2000, True), (9000, 2000, False), (5000, 200, False)):
+        assert (_chart('image/png', _png(w, h)) is not None) == ok, (w, h)
+
+
+class _PhotoRefusingBot(object):
+    """send_photo and send_media_group fail with an error the script has no branch for."""
+
+    def __init__(self):
+        self.texts = []
+
+    def _refuse(self, **kwargs):
+        err = _StubError('Error code: 400. Description: Bad Request: PHOTO_INVALID_DIMENSIONS')
+        err.error_code, err.result_json = 400, {'ok': False, 'error_code': 400}
+        err.result = type('Result', (), {'text': str(err)})()
+        raise err
+
+    send_photo = send_media_group = _refuse
+
+    def send_message(self, **kwargs):
+        self.texts.append(kwargs['text'])
+
+    def get_me(self):
+        return type('Me', (), {'username': 'testbot', 'id': 1})()
+
+
+def test_refused_chart_still_delivers_the_alert_as_text():
+    for graphs in ({'img': _png(900, 200), 'url': 'u'}, [_Stub()]):
+        bot = _PhotoRefusingBot()
+        saved = znt.bot, znt.get_send_id, znt.args
+        znt.bot, znt.get_send_id = bot, lambda to: 1
+        znt.args = znt.ArgParsing().create_parser().parse_args(['testuser', 's', '<root/>'])
+        code = None
+        try:
+            znt.send_messages('testuser', '<b>msg</b>', graphs)
+        except SystemExit as err:
+            code = err.code
+        finally:
+            znt.bot, znt.get_send_id, znt.args = saved
+        assert code == 0, (graphs, code)
+        assert bot.texts == ['<b>msg</b>'], (graphs, bot.texts)
+
 
 def _run():
     failed = 0

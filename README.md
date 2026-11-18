@@ -15,7 +15,7 @@ script.
 | | |
 |---|---|
 | Zabbix | **7.0** or **8.0**. `mediatypes.yaml` is a 7.0 export and will not import into an older server; the frontend link templates in the config follow 7.0's URL scheme. On 6.x, create the media type by hand and expect to adjust those links. |
-| Python | 3.6 or newer, whichever `/usr/bin/python3` is — that path is the script's shebang. Where the system Python refuses `pip install` (PEP 668: Debian 12+, Ubuntu 24.04+), use a venv and point the shebang at it — see *Install*, step 0. |
+| Python | 3.11 or newer, in a venv at `/opt/zbxTelegram/venv` — the script's shebang names that path, so the system Python and PEP 668 do not matter. Where the distro's `python3` is older (RHEL 8/9, Debian 11, Ubuntu 22.04), install a newer interpreter beside it (`dnf install python3.12`, `uv python install 3.12`) and create the venv with that. |
 | Packages | Pinned in `.requirements`: `pyTelegramBotAPI`, `xmltodict`; `pysocks` is used only with a proxy. |
 
 Paths below are the RHEL/Debian package defaults. Use whatever
@@ -25,10 +25,9 @@ user Zabbix runs as for `zabbix:zabbix`.
 ## Install
 
 ```sh
-# 0. only where the system Python is externally managed (PEP 668): a venv for the packages
+# 0. the venv the shebang names (python3.11+; on older distros use e.g. python3.12)
 python3 -m venv /opt/zbxTelegram/venv
 /opt/zbxTelegram/venv/bin/pip install -r .requirements
-sed -i '1s|^#!.*|#!/opt/zbxTelegram/venv/bin/python|' zbxTelegram.py   # before step 1
 
 # 1. the script, executable, plus its assets and the config schema
 install -m 0755 zbxTelegram.py /usr/lib/zabbix/alertscripts/
@@ -48,20 +47,14 @@ install -o root -g zabbix -m 0640 zbxTelegram.cfg.example \
 install -d -o zabbix -g zabbix -m 0750 /var/log/zbxTelegram
 install -d -o zabbix -g zabbix -m 0750 /var/lib/zbxTelegram
 install -m 0644 logrotate.zbxTelegram /etc/logrotate.d/zbxTelegram
-
-# 4. dependencies, into the interpreter the shebang names
-/usr/bin/python3 -m pip install -r .requirements
 ```
+
+To update: `git pull`, repeat steps 0 (pip upgrades the pins) and 1.
 
 Both the `.cfg` and the `.cfg.example` belong beside the script: the example is
 the schema the loader falls back to, so shipping only the `.cfg` turns a key you
 omitted into a `NameError` mid-delivery. The loader says so in the log when the
 example is missing.
-
-**On Debian 12, Ubuntu 23.04+, Fedora 38+** step 4 fails with
-`externally-managed-environment` (PEP 668). Use the distro packages where they
-exist, or `--break-system-packages`. A virtualenv will not work unless you also
-change the shebang, which is hardcoded to `/usr/bin/python3`.
 
 **With SELinux enforcing**, label the two new state directories or the writes
 are denied — the log falls back to stdout silently, and the cache failure costs
@@ -317,17 +310,16 @@ problems arrives late rather than lost.
 | `not found in the cache file` | a named recipient the bot has never heard from, or `getUpdates` retention expired |
 | `No XML envelope in the message` | plain-text alert, delivered as-is — expected for Zabbix internal alerts |
 | `XML envelope parsed but is missing fields` | the action's message template is wrong |
-| message arrives, chart is a tiny blank image | the chart account cannot see that host, or the frontend login failed |
+| message arrives without a chart | the log says why: `not an image` (login failed, no permission), `frontend message` (open the URL as the chart user; e.g. no OS locale for the frontend language), `outside Telegram photo limits`, or `Telegram refused the chart` |
 | nothing at all, no log line | the script is not executable, or Zabbix cannot find it |
 
 ## Tests
 
 ```sh
-python3 tests/test_parse.py
+/opt/zbxTelegram/venv/bin/python tests/test_parse.py
 ```
 
-No test framework and no fixtures — the deployment host has the system Python
-and nothing extra may be installed there. It does need `xmltodict` on the path,
+No test framework and no fixtures; run it with the venv's Python. It needs `xmltodict` on the path,
 because parsing the envelope is what is under test; `telebot`, `requests` and
 `PIL` are stubbed. Exit code 1 on failure.
 
