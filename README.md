@@ -14,8 +14,8 @@ script.
 
 | | |
 |---|---|
-| Zabbix | **7.0**. `mediatypes.yaml` is a 7.0 export and will not import into an older server; the frontend link templates in the config follow 7.0's URL scheme. On 6.x, create the media type by hand and expect to adjust those links. |
-| Python | 3.6 or newer, whichever `/usr/bin/python3` is — that path is the script's shebang. |
+| Zabbix | **7.0** or **8.0**. `mediatypes.yaml` is a 7.0 export and will not import into an older server; the frontend link templates in the config follow 7.0's URL scheme. On 6.x, create the media type by hand and expect to adjust those links. |
+| Python | 3.6 or newer, whichever `/usr/bin/python3` is — that path is the script's shebang. Where the system Python refuses `pip install` (PEP 668: Debian 12+, Ubuntu 24.04+), use a venv and point the shebang at it — see *Install*, step 0. |
 | Packages | Pinned in `.requirements`: `pyTelegramBotAPI`, `xmltodict`; `pysocks` is used only with a proxy. |
 
 Paths below are the RHEL/Debian package defaults. Use whatever
@@ -25,6 +25,11 @@ user Zabbix runs as for `zabbix:zabbix`.
 ## Install
 
 ```sh
+# 0. only where the system Python is externally managed (PEP 668): a venv for the packages
+python3 -m venv /opt/zbxTelegram/venv
+/opt/zbxTelegram/venv/bin/pip install -r .requirements
+sed -i '1s|^#!.*|#!/opt/zbxTelegram/venv/bin/python|' zbxTelegram.py   # before step 1
+
 # 1. the script, executable, plus its assets and the config schema
 install -m 0755 zbxTelegram.py /usr/lib/zabbix/alertscripts/
 install -m 0644 zbxTelegram.cfg.example /usr/lib/zabbix/alertscripts/

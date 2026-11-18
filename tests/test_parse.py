@@ -957,6 +957,29 @@ def test_unwritable_log_does_not_kill_delivery():
         znt.config_log_file = os.path.join(_TMP, 'znt.log')
 
 
+def test_chart_that_is_not_an_image_is_dropped_not_sent():
+    """Zabbix 8.0 can answer chart3.php with HTML; sending it as a photo loses the alert."""
+    class _Resp(object):
+        def __init__(self, ctype, body):
+            self.status_code, self.headers, self.content, self.url = 200, {'Content-Type': ctype}, body, 'u'
+
+    class _Requests(object):
+        def __init__(self, resp):
+            self.resp = resp
+
+        def get(self, *args, **kwargs):
+            return self.resp
+
+    saved = znt.requests, znt.get_cookie
+    znt.get_cookie = lambda: {'zbx_session': 'x'}
+    try:
+        znt.requests = _Requests(_Resp('text/html; charset=UTF-8', b'<!DOCTYPE html>'))
+        assert znt.get_chart_png(itemid=1, graff_name='g', period=60)['img'] is None
+        znt.requests = _Requests(_Resp('image/png', b'\x89PNG'))
+        assert znt.get_chart_png(itemid=1, graff_name='g', period=60)['img'] == b'\x89PNG'
+    finally:
+        znt.requests, znt.get_cookie = saved
+
 def _run():
     failed = 0
     for name, fn in sorted(globals().items()):

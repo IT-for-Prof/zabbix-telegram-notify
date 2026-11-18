@@ -418,6 +418,14 @@ def get_chart_png(itemid, graff_name, period=None):
                 verify=False,
                 timeout=10)
 
+            ctype = response.headers.get('Content-Type', '')
+            if response.status_code != 200 or not ctype.startswith('image/'):
+                # Zabbix 8.0 answers chart3.php with an HTML page (bad parameters,
+                # no permission) instead of a PNG; Telegram rejects those bytes as a
+                # photo (PHOTO_INVALID_DIMENSIONS) and the whole alert is lost.
+                loggings.warning('Chart is not an image (HTTP %s, %s, %s): %r; sending text only',
+                                 response.status_code, ctype, response.url, response.content[:300])
+                return dict(img=None, url=None)
             return dict(img=response.content, url=response.url)
         else:
             return dict(img=None, url=None)
