@@ -671,7 +671,7 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                         migrate_group_id(sent_to, sent_id, err)
                         send_messages(sent_to, message, graphs_png, disable_notification)
                     else:
-                        # The chart is optional, the alert is not: deliver it as text.
+                        # Deliver the alert as text without the chart rather than exit 1.
                         loggings.warning("Telegram refused the chart ({}); sending text only".format(err))
                         send_messages(sent_to, message, None, disable_notification)
                 except Exception as err:
@@ -696,7 +696,7 @@ def send_messages(sent_to, message, graphs_png, disable_notification=False):
                               mode='rb').read(), caption=message, parse_mode="HTML",
                              disable_notification=disable_notification)
                     else:
-                        # The chart is optional, the alert is not: deliver it as text.
+                        # Deliver the alert as text without the chart rather than exit 1.
                         loggings.warning("Telegram refused the chart ({}); sending text only".format(err))
                         send_messages(sent_to, message, None, disable_notification)
                 except Exception as err:

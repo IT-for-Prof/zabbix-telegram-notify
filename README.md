@@ -15,7 +15,7 @@ script.
 | | |
 |---|---|
 | Zabbix | **7.0** or **8.0**. `mediatypes.yaml` is a 7.0 export and will not import into an older server; the frontend link templates in the config follow 7.0's URL scheme. On 6.x, create the media type by hand and expect to adjust those links. |
-| Python | 3.11 or newer, in a venv at `/opt/zbxTelegram/venv` — the script's shebang names that path, so the system Python and PEP 668 do not matter. Where the distro's `python3` is older (RHEL 8/9, Debian 11, Ubuntu 22.04), install a newer interpreter beside it (`dnf install python3.12`, `uv python install 3.12`) and create the venv with that. |
+| Python | 3.11 or newer, in a venv at `/opt/zbxTelegram/venv` — the script's shebang names that path, so packages go into the venv and PEP 668 never blocks `pip`. Where the distro's `python3` is older (RHEL 8/9, Debian 11, Ubuntu 22.04), install a newer interpreter beside it (`dnf install python3.12`, `uv python install 3.12`) and create the venv with that. |
 | Packages | Pinned in `.requirements`: `pyTelegramBotAPI`, `xmltodict`; `pysocks` is used only with a proxy. |
 
 Paths below are the RHEL/Debian package defaults. Use whatever
@@ -49,7 +49,7 @@ install -d -o zabbix -g zabbix -m 0750 /var/lib/zbxTelegram
 install -m 0644 logrotate.zbxTelegram /etc/logrotate.d/zbxTelegram
 ```
 
-To update: `git pull`, repeat steps 0 (pip upgrades the pins) and 1.
+To update: `git pull`, then repeat steps 0 and 1; step 0 upgrades the pinned packages.
 
 Both the `.cfg` and the `.cfg.example` belong beside the script: the example is
 the schema the loader falls back to, so shipping only the `.cfg` turns a key you
