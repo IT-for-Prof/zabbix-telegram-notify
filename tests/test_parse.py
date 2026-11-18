@@ -980,6 +980,37 @@ def test_chart_that_is_not_an_image_is_dropped_not_sent():
     finally:
         znt.requests, znt.get_cookie = saved
 
+
+def test_chart_outside_telegram_photo_limits_is_dropped():
+    """A real PNG Telegram cannot take (ratio > 20, sides > 10000) must not cost the alert."""
+    import struct
+
+    def png(w, h):
+        return b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\rIHDR' + struct.pack('>II', w, h) + b'\x08\x06\x00\x00\x00'
+
+    class _Resp(object):
+        def __init__(self, body):
+            self.status_code, self.headers, self.content, self.url = 200, {'Content-Type': 'image/png'}, body, 'u'
+
+    class _Requests(object):
+        def __init__(self, body):
+            self.body = body
+
+        def get(self, *args, **kwargs):
+            return _Resp(self.body)
+
+    assert znt.png_size(png(900, 200)) == (900, 200)
+    assert znt.png_size(b'<html>') is None
+    saved = znt.requests, znt.get_cookie
+    znt.get_cookie = lambda: {'zbx_session': 'x'}
+    try:
+        for w, h, ok in ((900, 200, True), (900, 30, False), (9000, 2000, False)):
+            znt.requests = _Requests(png(w, h))
+            got = znt.get_chart_png(itemid=1, graff_name='g', period=60)['img']
+            assert (got is not None) == ok, (w, h)
+    finally:
+        znt.requests, znt.get_cookie = saved
+
 def _run():
     failed = 0
     for name, fn in sorted(globals().items()):

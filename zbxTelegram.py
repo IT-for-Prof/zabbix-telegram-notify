@@ -405,6 +405,13 @@ def get_cookie():
     return cookie
 
 
+def png_size(data):
+    """(width, height) from a PNG header, or None for anything else."""
+    if data[:8] != b'\x89PNG\r\n\x1a\n' or len(data) < 24:
+        return None
+    return int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+
+
 def get_chart_png(itemid, graff_name, period=None):
     try:
         cookies = get_cookie()
@@ -425,6 +432,13 @@ def get_chart_png(itemid, graff_name, period=None):
                 # photo (PHOTO_INVALID_DIMENSIONS) and the whole alert is lost.
                 loggings.warning('Chart is not an image (HTTP %s, %s, %s): %r; sending text only',
                                  response.status_code, ctype, response.url, response.content[:300])
+                return dict(img=None, url=None)
+            size = png_size(response.content)
+            # Telegram rejects a photo whose sides sum over 10000 px or whose aspect
+            # ratio exceeds 20 (PHOTO_INVALID_DIMENSIONS) and the alert is lost with it.
+            if size and (size[0] + size[1] > 10000 or max(size) > 20 * max(1, min(size))):
+                loggings.warning('Chart %sx%s is outside Telegram photo limits (%s); sending text only',
+                                 size[0], size[1], response.url)
                 return dict(img=None, url=None)
             return dict(img=response.content, url=response.url)
         else:
